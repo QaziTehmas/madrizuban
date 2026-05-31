@@ -1,167 +1,234 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <ctype.h>
-#include "lexer.h"
+/*
+ * MadriZuban Compiler v1.0
+ * lexer.c - Lexical Analyser
+ *
+ * Reads source characters and emits Tokens.
+ * Handles: keywords, identifiers, int/string/bool literals,
+ *          operators (including two-char), delimiters, comments.
+ */
 
-void lexer_init(Lexer *l, const char *src) {
-    l->src  = src;
-    l->pos  = 0;
-    l->line = 1;
+#include "madrizuban.h"
+
+/* ─── Lexer state ─────────────────────────────────────────────────────────── */
+static const char *src_buf   = NULL;
+static int         src_pos   = 0;
+static int         src_len   = 0;
+static int         cur_line  = 1;
+static Token       peeked;
+static int         has_peeked = 0;
+
+/* ─── Helpers ─────────────────────────────────────────────────────────────── */
+static char peek_char(void) {
+    if (src_pos >= src_len) return '\0';
+    return src_buf[src_pos];
 }
 
-static char peek_char(Lexer *l) { return l->src[l->pos]; }
-static char advance(Lexer *l)   { char c = l->src[l->pos]; if (c) l->pos++; if (c == '\n') l->line++; return c; }
+static char advance_char(void) {
+    char c = src_buf[src_pos++];
+    if (c == '\n') cur_line++;
+    return c;
+}
 
-static void skip_whitespace_comments(Lexer *l) {
-    while (1) {
-        char c = peek_char(l);
-        if (c == ' ' || c == '\t' || c == '\r' || c == '\n') {
-            advance(l);
-        } else if (c == '/' && l->src[l->pos+1] == '/') {
-            /* single-line comment */
-            while (peek_char(l) && peek_char(l) != '\n') advance(l);
-        } else if (c == '/' && l->src[l->pos+1] == '*') {
-            /* block comment */
-            advance(l); advance(l);
-            while (peek_char(l)) {
-                if (peek_char(l) == '*' && l->src[l->pos+1] == '/') {
-                    advance(l); advance(l); break;
-                }
-                advance(l);
-            }
-        } else {
-            break;
+static void skip_whitespace_and_comments(void) {
+    for (;;) {
+        /* Skip whitespace */
+        while (src_pos < src_len && isspace((unsigned char)peek_char()))
+            advance_char();
+
+        /* Single-line comment // */
+        if (src_pos + 1 < src_len &&
+            src_buf[src_pos] == '/' && src_buf[src_pos+1] == '/') {
+            while (src_pos < src_len && peek_char() != '\n')
+                advance_char();
+            continue;
         }
+
+        /* Block comment: scan until star-slash */
+        if (src_pos + 1 < src_len &&
+            src_buf[src_pos] == '/' && src_buf[src_pos+1] == '*') {
+            src_pos += 2;
+            while (src_pos + 1 < src_len &&
+                   !(src_buf[src_pos] == '*' && src_buf[src_pos+1] == '/')) {
+                if (src_buf[src_pos] == '\n') cur_line++;
+                src_pos++;
+            }
+            if (src_pos + 1 < src_len) src_pos += 2; /* consume closing */
+            continue;
+        }
+
+        break;
     }
 }
 
-static Token make_tok(TokenType t, const char *lex, int line) {
+/* Map identifier string to keyword token type (or TOK_IDENT) */
+static TokenType classify_keyword(const char *s) {
+    if (strcmp(s, "int")     == 0) return TOK_INT;
+    if (strcmp(s, "string")  == 0) return TOK_STRING;
+    if (strcmp(s, "bool")    == 0) return TOK_BOOL;
+    if (strcmp(s, "arzkro")  == 0) return TOK_ARZKRO;
+    if (strcmp(s, "agar")    == 0) return TOK_AGAR;
+    if (strcmp(s, "warna")   == 0) return TOK_WARNA;
+    if (strcmp(s, "jabtak")  == 0) return TOK_JABTAK;
+    if (strcmp(s, "sach")    == 0) return TOK_SACH;
+    if (strcmp(s, "jhoot")   == 0) return TOK_JHOOT;
+    return TOK_IDENT;
+}
+
+/* ─── Public: initialise lexer ────────────────────────────────────────────── */
+void lexer_init(const char *src) {
+    src_buf    = src;
+    src_pos    = 0;
+    src_len    = (int)strlen(src);
+    cur_line   = 1;
+    has_peeked = 0;
+}
+
+/* ─── Core: produce next token ────────────────────────────────────────────── */
+Token lexer_next(void) {
+    if (has_peeked) {
+        has_peeked = 0;
+        return peeked;
+    }
+
     Token tok;
-    tok.type = t;
-    tok.line = line;
-    strncpy(tok.lexeme, lex, MAX_TOKEN_LEN - 1);
-    tok.lexeme[MAX_TOKEN_LEN - 1] = '\0';
+    memset(&tok, 0, sizeof(tok));
+
+    skip_whitespace_and_comments();
+    tok.line = cur_line;
+
+    if (src_pos >= src_len) {
+        tok.type = TOK_EOF;
+        strcpy(tok.lexeme, "EOF");
+        return tok;
+    }
+
+    char c = peek_char();
+
+    /* ── Integer literal ── */
+    if (isdigit((unsigned char)c)) {
+        int i = 0;
+        while (src_pos < src_len && isdigit((unsigned char)peek_char()))
+            tok.lexeme[i++] = advance_char();
+        tok.lexeme[i] = '\0';
+        tok.type = TOK_INT_LIT;
+        return tok;
+    }
+
+    /* ── Identifier / keyword ── */
+    if (isalpha((unsigned char)c) || c == '_') {
+        int i = 0;
+        while (src_pos < src_len &&
+               (isalnum((unsigned char)peek_char()) || peek_char() == '_'))
+            tok.lexeme[i++] = advance_char();
+        tok.lexeme[i] = '\0';
+        tok.type = classify_keyword(tok.lexeme);
+
+        /* sach / jhoot are bool literals */
+        if (tok.type == TOK_SACH || tok.type == TOK_JHOOT)
+            tok.type = (tok.type == TOK_SACH) ? TOK_SACH : TOK_JHOOT;
+
+        return tok;
+    }
+
+    /* ── String literal ── */
+    if (c == '"') {
+        advance_char(); /* consume opening quote */
+        int i = 0;
+        while (src_pos < src_len && peek_char() != '"') {
+            if (peek_char() == '\\') {
+                advance_char();
+                char esc = advance_char();
+                switch (esc) {
+                    case 'n':  tok.lexeme[i++] = '\n'; break;
+                    case 't':  tok.lexeme[i++] = '\t'; break;
+                    default:   tok.lexeme[i++] = esc;  break;
+                }
+            } else {
+                tok.lexeme[i++] = advance_char();
+            }
+        }
+        if (src_pos < src_len) advance_char(); /* consume closing quote */
+        tok.lexeme[i] = '\0';
+        tok.type = TOK_STRING_LIT;
+        return tok;
+    }
+
+    /* ── Two-character operators ── */
+    advance_char(); /* consume first char */
+
+    if (c == '=' && peek_char() == '=') { advance_char(); tok.type = TOK_EQ;  strcpy(tok.lexeme, "=="); return tok; }
+    if (c == '!' && peek_char() == '=') { advance_char(); tok.type = TOK_NEQ; strcpy(tok.lexeme, "!="); return tok; }
+    if (c == '<' && peek_char() == '=') { advance_char(); tok.type = TOK_LTE; strcpy(tok.lexeme, "<="); return tok; }
+    if (c == '>' && peek_char() == '=') { advance_char(); tok.type = TOK_GTE; strcpy(tok.lexeme, ">="); return tok; }
+
+    /* ── Single-character operators / delimiters ── */
+    tok.lexeme[0] = c;
+    tok.lexeme[1] = '\0';
+    switch (c) {
+        case '+': tok.type = TOK_PLUS;      break;
+        case '-': tok.type = TOK_MINUS;     break;
+        case '*': tok.type = TOK_STAR;      break;
+        case '/': tok.type = TOK_SLASH;     break;
+        case '=': tok.type = TOK_ASSIGN;    break;
+        case '<': tok.type = TOK_LT;        break;
+        case '>': tok.type = TOK_GT;        break;
+        case '(': tok.type = TOK_LPAREN;    break;
+        case ')': tok.type = TOK_RPAREN;    break;
+        case '{': tok.type = TOK_LBRACE;    break;
+        case '}': tok.type = TOK_RBRACE;    break;
+        case ';': tok.type = TOK_SEMICOLON; break;
+        default:
+            tok.type = TOK_UNKNOWN;
+            fprintf(stderr, RED "[MadriZuban Ghalti]" RESET
+                    " bhaiyaaaa Line %d: Yeh haroof nahi pehchana → '%c'\n",
+                    cur_line, c);
+            break;
+    }
     return tok;
 }
 
-Token lexer_next(Lexer *l) {
-    skip_whitespace_comments(l);
-    int line = l->line;
-    char c = peek_char(l);
-
-    if (!c) return make_tok(TOK_EOF, "EOF", line);
-
-    /* String literal */
-    if (c == '"') {
-        advance(l);
-        char buf[MAX_TOKEN_LEN]; int bi = 0;
-        while (peek_char(l) && peek_char(l) != '"') {
-            if (bi < MAX_TOKEN_LEN - 1) buf[bi++] = advance(l);
-            else advance(l);
-        }
-        if (peek_char(l) == '"') advance(l);
-        buf[bi] = '\0';
-        return make_tok(TOK_STR_LIT, buf, line);
+/* ─── Peek one token ahead ────────────────────────────────────────────────── */
+Token lexer_peek(void) {
+    if (!has_peeked) {
+        peeked     = lexer_next();
+        has_peeked = 1;
     }
-
-    /* Number */
-    if (isdigit(c)) {
-        char buf[MAX_TOKEN_LEN]; int bi = 0;
-        while (isdigit(peek_char(l)) && bi < MAX_TOKEN_LEN - 1)
-            buf[bi++] = advance(l);
-        buf[bi] = '\0';
-        return make_tok(TOK_INT_LIT, buf, line);
-    }
-
-    /* Identifier / keyword */
-    if (isalpha(c) || c == '_') {
-        char buf[MAX_TOKEN_LEN]; int bi = 0;
-        while ((isalnum(peek_char(l)) || peek_char(l) == '_') && bi < MAX_TOKEN_LEN - 1)
-            buf[bi++] = advance(l);
-        buf[bi] = '\0';
-
-        if (strcmp(buf, "int")    == 0) return make_tok(TOK_INT,    buf, line);
-        if (strcmp(buf, "string") == 0) return make_tok(TOK_STRING, buf, line);
-        if (strcmp(buf, "bool")   == 0) return make_tok(TOK_BOOL,   buf, line);
-        if (strcmp(buf, "arzkro") == 0) return make_tok(TOK_ARZKRO, buf, line);
-        if (strcmp(buf, "agar")   == 0) return make_tok(TOK_AGAR,   buf, line);
-        if (strcmp(buf, "warna")  == 0) return make_tok(TOK_WARNA,  buf, line);
-        if (strcmp(buf, "jabtak") == 0) return make_tok(TOK_JABTAK, buf, line);
-        if (strcmp(buf, "sach")   == 0) return make_tok(TOK_SACH,   buf, line);
-        if (strcmp(buf, "jhoot")  == 0) return make_tok(TOK_JHOOT,  buf, line);
-        return make_tok(TOK_IDENT, buf, line);
-    }
-
-    /* Two-char operators */
-    advance(l);
-    char nc = peek_char(l);
-
-    if (c == '=' && nc == '=') { advance(l); return make_tok(TOK_EQ,  "==", line); }
-    if (c == '!' && nc == '=') { advance(l); return make_tok(TOK_NEQ, "!=", line); }
-    if (c == '<' && nc == '=') { advance(l); return make_tok(TOK_LTE, "<=", line); }
-    if (c == '>' && nc == '=') { advance(l); return make_tok(TOK_GTE, ">=", line); }
-
-    /* Single-char */
-    char buf[2] = {c, '\0'};
-    switch (c) {
-        case '+': return make_tok(TOK_PLUS,      buf, line);
-        case '-': return make_tok(TOK_MINUS,     buf, line);
-        case '*': return make_tok(TOK_STAR,      buf, line);
-        case '/': return make_tok(TOK_SLASH,     buf, line);
-        case '=': return make_tok(TOK_ASSIGN,    buf, line);
-        case '<': return make_tok(TOK_LT,        buf, line);
-        case '>': return make_tok(TOK_GT,        buf, line);
-        case '(': return make_tok(TOK_LPAREN,    buf, line);
-        case ')': return make_tok(TOK_RPAREN,    buf, line);
-        case '{': return make_tok(TOK_LBRACE,    buf, line);
-        case '}': return make_tok(TOK_RBRACE,    buf, line);
-        case ';': return make_tok(TOK_SEMICOLON, buf, line);
-    }
-
-    char ub[2] = {c, '\0'};
-    return make_tok(TOK_UNKNOWN, ub, line);
+    return peeked;
 }
 
-Token lexer_peek(Lexer *l) {
-    Lexer save = *l;
-    Token t = lexer_next(l);
-    *l = save;
-    return t;
-}
-
+/* ─── Debug: token type as string ─────────────────────────────────────────── */
 const char *token_type_str(TokenType t) {
     switch (t) {
-        case TOK_INT_LIT:   return "INT_LITERAL";
-        case TOK_STR_LIT:   return "STR_LITERAL";
-        case TOK_BOOL_LIT:  return "BOOL_LITERAL";
-        case TOK_INT:       return "int";
-        case TOK_STRING:    return "string";
-        case TOK_BOOL:      return "bool";
-        case TOK_ARZKRO:    return "arzkro";
-        case TOK_AGAR:      return "agar";
-        case TOK_WARNA:     return "warna";
-        case TOK_JABTAK:    return "jabtak";
-        case TOK_SACH:      return "sach";
-        case TOK_JHOOT:     return "jhoot";
-        case TOK_IDENT:     return "IDENTIFIER";
-        case TOK_PLUS:      return "+";
-        case TOK_MINUS:     return "-";
-        case TOK_STAR:      return "*";
-        case TOK_SLASH:     return "/";
-        case TOK_ASSIGN:    return "=";
-        case TOK_EQ:        return "==";
-        case TOK_NEQ:       return "!=";
-        case TOK_LT:        return "<";
-        case TOK_GT:        return ">";
-        case TOK_LTE:       return "<=";
-        case TOK_GTE:       return ">=";
-        case TOK_LPAREN:    return "(";
-        case TOK_RPAREN:    return ")";
-        case TOK_LBRACE:    return "{";
-        case TOK_RBRACE:    return "}";
-        case TOK_SEMICOLON: return ";";
-        case TOK_EOF:       return "EOF";
-        default:            return "UNKNOWN";
+        case TOK_INT_LIT:    return "INT_LIT";
+        case TOK_STRING_LIT: return "STRING_LIT";
+        case TOK_BOOL_LIT:   return "BOOL_LIT";
+        case TOK_IDENT:      return "IDENT";
+        case TOK_INT:        return "int";
+        case TOK_STRING:     return "string";
+        case TOK_BOOL:       return "bool";
+        case TOK_ARZKRO:     return "arzkro";
+        case TOK_AGAR:       return "agar";
+        case TOK_WARNA:      return "warna";
+        case TOK_JABTAK:     return "jabtak";
+        case TOK_SACH:       return "sach";
+        case TOK_JHOOT:      return "jhoot";
+        case TOK_PLUS:       return "+";
+        case TOK_MINUS:      return "-";
+        case TOK_STAR:       return "*";
+        case TOK_SLASH:      return "/";
+        case TOK_ASSIGN:     return "=";
+        case TOK_EQ:         return "==";
+        case TOK_NEQ:        return "!=";
+        case TOK_LT:         return "<";
+        case TOK_GT:         return ">";
+        case TOK_LTE:        return "<=";
+        case TOK_GTE:        return ">=";
+        case TOK_LPAREN:     return "(";
+        case TOK_RPAREN:     return ")";
+        case TOK_LBRACE:     return "{";
+        case TOK_RBRACE:     return "}";
+        case TOK_SEMICOLON:  return ";";
+        case TOK_EOF:        return "EOF";
+        default:             return "UNKNOWN";
     }
 }

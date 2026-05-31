@@ -1,0 +1,27 @@
+// MadriZuban Test 4: bool type (sach / jhoot)
+// Tests: boolean variables, bool in conditions
+
+bool flag = sach;
+bool off  = jhoot;
+
+arzkro flag;
+arzkro off;
+
+// Use bool in agar
+int result = 0;
+agar (flag == sach) {
+    result = 99;
+} warna {
+    result = 0;
+}
+arzkro result;
+
+// Bool from comparison
+int a = 10;
+int b = 20;
+bool isGreater = jhoot;
+
+agar (a < b) {
+    isGreater = sach;
+}
+arzkro isGreater;

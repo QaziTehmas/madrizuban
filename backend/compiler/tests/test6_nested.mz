@@ -1,0 +1,38 @@
+// MadriZuban Test 6: Nested agar/warna + jabtak combined
+// Tests: nesting, complex program logic
+
+int score = 85;
+string grade = "fail";
+
+agar (score >= 90) {
+    grade = "A";
+} warna {
+    agar (score >= 80) {
+        grade = "B";
+    } warna {
+        agar (score >= 70) {
+            grade = "C";
+        } warna {
+            grade = "F";
+        }
+    }
+}
+
+arzkro score;
+arzkro grade;
+
+// Countdown using jabtak
+int x = 5;
+jabtak (x > 0) {
+    arzkro x;
+    x = x - 1;
+}
+
+// Powers of 2
+int power = 1;
+int count = 0;
+jabtak (count < 5) {
+    arzkro power;
+    power = power * 2;
+    count = count + 1;
+}

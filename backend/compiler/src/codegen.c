@@ -1,125 +1,217 @@
-#include <stdio.h>
-#include <string.h>
-#include "codegen.h"
+/*
+ * MadriZuban Compiler v1.0
+ * codegen.c - Intermediate Code Generation (Three-Address Code)
+ *
+ * Produces TAC instructions of the form:
+ *   result = arg1 op arg2   (BINOP)
+ *   result = arg1            (COPY / PARAM)
+ *   PRINT arg1               (arzkro)
+ *   IF arg1 GOTO label       (conditional jump)
+ *   GOTO label               (unconditional jump)
+ *   LABEL label:             (label definition)
+ */
 
-void codegen_init(CodeGenCtx *ctx, FILE *out) {
-    ctx->temp_count  = 0;
-    ctx->label_count = 0;
-    ctx->out         = out;
-}
+#include "madrizuban.h"
 
-static char *new_temp(CodeGenCtx *ctx, char *buf) {
-    sprintf(buf, "t%d", ctx->temp_count++);
+/* ─── Code generation state ───────────────────────────────────────────────── */
+static TACInstr *tac_head = NULL;
+static TACInstr *tac_tail = NULL;
+static int       temp_ctr = 0;
+static int       label_ctr = 0;
+
+/* ─── Helpers ─────────────────────────────────────────────────────────────── */
+static char *new_temp(void) {
+    static char buf[32];
+    snprintf(buf, sizeof(buf), "t%d", temp_ctr++);
     return buf;
 }
 
-static char *new_label(CodeGenCtx *ctx, char *buf) {
-    sprintf(buf, "L%d", ctx->label_count++);
+static char *new_label(void) {
+    static char buf[32];
+    snprintf(buf, sizeof(buf), "L%d", label_ctr++);
     return buf;
 }
 
-/* Returns the name of the result (temp or literal) in result_buf */
-static void gen_expr(CodeGenCtx *ctx, ASTNode *node, char *result_buf) {
-    if (!node) { strcpy(result_buf, "0"); return; }
+static void emit(const char *op, const char *result,
+                 const char *arg1, const char *arg2) {
+    TACInstr *instr = (TACInstr *)calloc(1, sizeof(TACInstr));
+    if (op)     strncpy(instr->op,     op,     15);
+    if (result) strncpy(instr->result, result, 63);
+    if (arg1)   strncpy(instr->arg1,   arg1,   63);
+    if (arg2)   strncpy(instr->arg2,   arg2,   63);
 
-    switch (node->type) {
-        case NODE_INT_LIT:
-            sprintf(result_buf, "%d", node->int_val);
-            return;
-
-        case NODE_STR_LIT:
-            sprintf(result_buf, "\"%s\"", node->str_val);
-            return;
-
-        case NODE_BOOL_LIT:
-            sprintf(result_buf, "%s", node->bool_val ? "1" : "0");
-            return;
-
-        case NODE_IDENT:
-            strcpy(result_buf, node->name);
-            return;
-
-        case NODE_BINOP: {
-            char l[64], r[64], t[16];
-            gen_expr(ctx, node->left,  l);
-            gen_expr(ctx, node->right, r);
-            new_temp(ctx, t);
-            fprintf(ctx->out, "    %s = %s %s %s\n", t, l, node->op, r);
-            strcpy(result_buf, t);
-            return;
-        }
-
-        default:
-            strcpy(result_buf, "0");
+    if (!tac_head) {
+        tac_head = tac_tail = instr;
+    } else {
+        tac_tail->next = instr;
+        tac_tail = instr;
     }
 }
 
-static void gen_stmt(CodeGenCtx *ctx, ASTNode *node) {
+/* ─── Forward ─────────────────────────────────────────────────────────────── */
+static char *gen_expr(ASTNode *node);
+static void  gen_stmt(ASTNode *node);
+
+/* ─── Generate expression, returns temp/literal name holding value ────────── */
+static char *gen_expr(ASTNode *node) {
+    static char literal_buf[128];
+
+    if (!node) return "_";
+
+    switch (node->type) {
+
+        case NODE_INT_LIT:
+            snprintf(literal_buf, sizeof(literal_buf), "%d", node->ival);
+            return literal_buf;
+
+        case NODE_STRING_LIT:
+            snprintf(literal_buf, sizeof(literal_buf), "\"%s\"", node->sval);
+            return literal_buf;
+
+        case NODE_BOOL_LIT:
+            snprintf(literal_buf, sizeof(literal_buf), "%s",
+                     node->bval ? "sach" : "jhoot");
+            return literal_buf;
+
+        case NODE_IDENT:
+            return node->sval;
+
+        case NODE_BINOP: {
+            char *l   = gen_expr(node->left);
+            char lbuf[64]; strncpy(lbuf, l, 63); /* snapshot before recursive call */
+            char *r   = gen_expr(node->right);
+            char *tmp = new_temp();
+
+            /* Handle comparison ops */
+            if (strcmp(node->op,"==")==0 || strcmp(node->op,"!=")==0 ||
+                strcmp(node->op,"<") ==0 || strcmp(node->op,">") ==0 ||
+                strcmp(node->op,"<=")==0 || strcmp(node->op,">=")==0) {
+                emit("CMP", tmp, lbuf, r);
+                /* Store operator so print phase can show it */
+                char cmp_op_buf[96];
+                snprintf(cmp_op_buf, sizeof(cmp_op_buf), "%s%s%s", lbuf, node->op, r);
+                /* overwrite result with annotated form */
+                snprintf(tac_tail->result, 63, "%s", tmp);
+                snprintf(tac_tail->arg1, 63, "%s", lbuf);
+                snprintf(tac_tail->arg2, 63, "%s %s", node->op, r);
+            } else {
+                emit(node->op, tmp, lbuf, r);
+            }
+            return tmp;
+        }
+
+        default:
+            return "_";
+    }
+}
+
+/* ─── Generate statement ──────────────────────────────────────────────────── */
+static void gen_stmt(ASTNode *node) {
     if (!node) return;
 
     switch (node->type) {
-        case NODE_DECL: {
-            if (node->left) {
-                char val[256];
-                gen_expr(ctx, node->left, val);
-                fprintf(ctx->out, "    %s = %s\n", node->name, val);
-            } else {
-                fprintf(ctx->out, "    %s = 0   ; (uninit)\n", node->name);
-            }
+
+        case NODE_PROGRAM:
+        case NODE_BLOCK: {
+            ASTNode *s = node->body;
+            while (s) { gen_stmt(s); s = s->next; }
+            break;
+        }
+
+        case NODE_VAR_DECL: {
+            char *rhs = gen_expr(node->left);
+            emit("DECL", node->sval, rhs, dtype_str(node->dtype));
             break;
         }
 
         case NODE_ASSIGN: {
-            char val[256];
-            gen_expr(ctx, node->left, val);
-            fprintf(ctx->out, "    %s = %s\n", node->name, val);
+            char *rhs = gen_expr(node->left);
+            char rbuf[64]; strncpy(rbuf, rhs, 63);
+            emit("=", node->sval, rbuf, NULL);
             break;
         }
 
         case NODE_ARZKRO: {
-            char val[256];
-            gen_expr(ctx, node->left, val);
-            fprintf(ctx->out, "    PRINT %s\n", val);
+            char *val = gen_expr(node->left);
+            char vbuf[64]; strncpy(vbuf, val, 63);
+            emit("PRINT", vbuf, NULL, NULL);
             break;
         }
 
         case NODE_AGAR: {
-            char cond[64], l_else[16], l_end[16];
-            gen_expr(ctx, node->cond, cond);
-            new_label(ctx, l_else);
-            new_label(ctx, l_end);
-            fprintf(ctx->out, "    IF_FALSE %s GOTO %s\n", cond, l_else);
-            gen_stmt(ctx, node->body);
-            fprintf(ctx->out, "    GOTO %s\n", l_end);
-            fprintf(ctx->out, "%s:\n", l_else);
-            if (node->else_body) gen_stmt(ctx, node->else_body);
-            fprintf(ctx->out, "%s:\n", l_end);
+            char *cond       = gen_expr(node->cond);
+            char cond_buf[64]; strncpy(cond_buf, cond, 63);
+            char *label_else = new_label();
+            char *label_end  = new_label();
+
+            emit("IFFALSE", cond_buf, "GOTO", label_else);
+            gen_stmt(node->body);
+            emit("GOTO", label_end, NULL, NULL);
+            emit("LABEL", label_else, NULL, NULL);
+            if (node->elseb) gen_stmt(node->elseb);
+            emit("LABEL", label_end, NULL, NULL);
             break;
         }
 
         case NODE_JABTAK: {
-            char l_start[16], l_end[16], cond[64];
-            new_label(ctx, l_start);
-            new_label(ctx, l_end);
-            fprintf(ctx->out, "%s:\n", l_start);
-            gen_expr(ctx, node->cond, cond);
-            fprintf(ctx->out, "    IF_FALSE %s GOTO %s\n", cond, l_end);
-            gen_stmt(ctx, node->body);
-            fprintf(ctx->out, "    GOTO %s\n", l_start);
-            fprintf(ctx->out, "%s:\n", l_end);
+            char *label_start = new_label();
+            char *label_end   = new_label();
+
+            emit("LABEL", label_start, NULL, NULL);
+            char *cond = gen_expr(node->cond);
+            char cond_buf[64]; strncpy(cond_buf, cond, 63);
+            emit("IFFALSE", cond_buf, "GOTO", label_end);
+            gen_stmt(node->body);
+            emit("GOTO", label_start, NULL, NULL);
+            emit("LABEL", label_end, NULL, NULL);
             break;
         }
 
         default:
             break;
     }
-
-    gen_stmt(ctx, node->next);
 }
 
-void codegen_generate(CodeGenCtx *ctx, ASTNode *root) {
-    fprintf(ctx->out, "; ===== MadriZuban Three-Address Code (TAC) =====\n");
-    fprintf(ctx->out, "BEGIN_PROGRAM\n");
-    if (root) gen_stmt(ctx, root->body);
-    fprintf(ctx->out, "END_PROGRAM\n");
+/* ─── Public: generate TAC from AST ──────────────────────────────────────── */
+TACInstr *codegen_generate(ASTNode *root) {
+    tac_head = tac_tail = NULL;
+    temp_ctr = label_ctr = 0;
+    gen_stmt(root);
+    return tac_head;
+}
+
+/* ─── Print TAC ───────────────────────────────────────────────────────────── */
+void tac_print(TACInstr *list) {
+    printf(CYAN "\n=== Three-Address Code (TAC) ===\n" RESET);
+    int i = 1;
+    for (TACInstr *p = list; p; p = p->next, i++) {
+        if (strcmp(p->op, "LABEL") == 0) {
+            printf(GREEN "  %s:\n" RESET, p->result);
+        } else if (strcmp(p->op, "PRINT") == 0) {
+            printf("  %3d │  PRINT %s\n", i, p->result);
+        } else if (strcmp(p->op, "DECL") == 0) {
+            printf("  %3d │  DECL %s (%s) = %s\n", i, p->result, p->arg2, p->arg1);
+        } else if (strcmp(p->op, "GOTO") == 0) {
+            printf("  %3d │  GOTO %s\n", i, p->result);
+        } else if (strcmp(p->op, "IFFALSE") == 0) {
+            printf("  %3d │  IFFALSE %s GOTO %s\n", i, p->result, p->arg2);
+        } else if (strcmp(p->op, "=") == 0) {
+            printf("  %3d │  %s = %s\n", i, p->result, p->arg1);
+        } else if (strcmp(p->op, "CMP") == 0) {
+            printf("  %3d │  %s = %s %s\n", i, p->result, p->arg1, p->arg2);
+        } else {
+            printf("  %3d │  %s = %s %s %s\n", i,
+                   p->result, p->arg1, p->op, p->arg2);
+        }
+    }
+    printf("\n");
+}
+
+/* ─── Free TAC list ───────────────────────────────────────────────────────── */
+void tac_free(TACInstr *list) {
+    while (list) {
+        TACInstr *tmp = list->next;
+        free(list);
+        list = tmp;
+    }
 }

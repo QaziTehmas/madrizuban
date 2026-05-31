@@ -1,6 +1,0 @@
-int x = 3;
-arzkro x;
-string msg = "Salam";
-arzkro msg;
-bool flag = sach;
-agar (flag) { arzkro 1; } warna { arzkro 0; }

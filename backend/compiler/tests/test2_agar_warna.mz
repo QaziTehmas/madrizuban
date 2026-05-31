@@ -1,17 +1,28 @@
-// Test 2: agar / warna (if / else)
-// MadriZuban - Conditional logic
+// MadriZuban Test 2: agar / warna (if / else)
+// Tests: conditional branching, comparison operators
 
-int x = 20;
-int y = 30;
+int marks = 75;
 
-agar (x > y) {
-    arzkro x;
+agar (marks >= 80) {
+    arzkro marks;
 } warna {
-    arzkro y;
+    arzkro marks;
 }
 
-// Nested agar
-int score = 85;
-agar (score >= 80) {
-    arzkro score;
+// Nested condition
+int x = 100;
+int y = 50;
+
+agar (x > y) {
+    int big = x * 2;
+    arzkro big;
+} warna {
+    int small = y * 2;
+    arzkro small;
+}
+
+// Equality check
+int age = 18;
+agar (age == 18) {
+    arzkro age;
 }

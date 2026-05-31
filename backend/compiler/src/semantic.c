@@ -1,141 +1,218 @@
-#include <stdio.h>
-#include <string.h>
-#include "semantic.h"
-#include "errors.h"
+/*
+ * MadriZuban Compiler v1.0
+ * semantic.c - Semantic Analysis
+ *
+ * Checks:
+ *   1. Variable declared before use
+ *   2. No re-declaration of same variable
+ *   3. Type compatibility in assignments and expressions
+ *   4. arzkro used on valid expression
+ *   5. Division by zero (constant)
+ *   6. bool conditions in agar/jabtak
+ */
 
-void semantic_init(SemanticCtx *ctx) {
-    sym_init(&ctx->table);
-    ctx->error_count = 0;
+#include "madrizuban.h"
+
+static int sem_errors   = 0;
+static int sem_warnings = 0;
+
+/* ─── Forward ─────────────────────────────────────────────────────────────── */
+static DataType check_expr(ASTNode *node, SymTable *st);
+static void     check_stmt(ASTNode *node, SymTable *st);
+
+/* ─── Error/Warning helpers ───────────────────────────────────────────────── */
+static void sem_error(int line, const char *msg, const char *extra) {
+    fprintf(stderr, RED "[MadriZuban Ghalti]" RESET
+            " bhaiyaaaa Line %d: %s%s%s\n",
+            line, msg,
+            extra ? " → '" : "",
+            extra ? extra  : "");
+    if (extra) fprintf(stderr, "'\n");
+    sem_errors++;
 }
 
-static DataType check_expr(SemanticCtx *ctx, ASTNode *node);
+static void sem_warn(int line, const char *msg) {
+    fprintf(stderr, YELLOW "[MadriZuban Khabardar]" RESET
+            " bhaiyaaaa Line %d: %s\n", line, msg);
+    sem_warnings++;
+}
 
-static DataType check_expr(SemanticCtx *ctx, ASTNode *node) {
-    if (!node) return TYPE_INT;
+/* ─── Type-check expression, returns inferred type ───────────────────────── */
+static DataType check_expr(ASTNode *node, SymTable *st) {
+    if (!node) return TYPE_ERROR;
 
     switch (node->type) {
+
         case NODE_INT_LIT:
             return TYPE_INT;
 
-        case NODE_STR_LIT:
+        case NODE_STRING_LIT:
             return TYPE_STRING;
 
         case NODE_BOOL_LIT:
             return TYPE_BOOL;
 
         case NODE_IDENT: {
-            Symbol *s = sym_lookup(&ctx->table, node->name);
-            if (!s) {
-                semantic_error(node->line,
-                    "Yeh variable kabhi bataya nahi tha", node->name);
-                ctx->error_count++;
-                return TYPE_INT;
+            SymEntry *e = symtable_lookup(st, node->sval);
+            if (!e) {
+                sem_error(node->line,
+                          "Yeh variable kabhi bataya nahi", node->sval);
+                return TYPE_ERROR;
             }
-            return s->type;
+            if (!e->initialized) {
+                char buf[128];
+                snprintf(buf, sizeof(buf),
+                         "'%s' use kiya lekin initialize nahi tha", node->sval);
+                sem_warn(node->line, buf);
+            }
+            return e->dtype;
         }
 
         case NODE_BINOP: {
-            DataType lt = check_expr(ctx, node->left);
-            DataType rt = check_expr(ctx, node->right);
+            DataType lt = check_expr(node->left,  st);
+            DataType rt = check_expr(node->right, st);
 
-            /* Comparison operators return bool */
+            /* Division by zero check (constant folding) */
+            if ((strcmp(node->op, "/") == 0) &&
+                node->right && node->right->type == NODE_INT_LIT &&
+                node->right->ival == 0) {
+                sem_warn(node->line,
+                         "Zero se taqseem? Serious ho tum?");
+            }
+
+            /* Comparison operators → bool result */
             if (strcmp(node->op, "==") == 0 || strcmp(node->op, "!=") == 0 ||
                 strcmp(node->op, "<")  == 0 || strcmp(node->op, ">")  == 0 ||
                 strcmp(node->op, "<=") == 0 || strcmp(node->op, ">=") == 0) {
+                if (lt != rt && lt != TYPE_ERROR && rt != TYPE_ERROR) {
+                    sem_error(node->line,
+                              "Comparison mein alag types nahi chal sakte", NULL);
+                }
                 return TYPE_BOOL;
             }
 
-            /* Arithmetic only valid on int */
-            if (lt != TYPE_INT || rt != TYPE_INT) {
-                semantic_error(node->line,
-                    "Arithmetic sirf integers pe hoti hai", node->op);
-                ctx->error_count++;
+            /* Arithmetic → int only */
+            if (lt == TYPE_STRING || rt == TYPE_STRING) {
+                sem_error(node->line,
+                          "Arithmetic string par nahi hoti bhai", NULL);
+                return TYPE_ERROR;
             }
-
-            /* Warn on literal division by zero */
-            if (strcmp(node->op, "/") == 0 &&
-                node->right && node->right->type == NODE_INT_LIT &&
-                node->right->int_val == 0) {
-                semantic_warning(node->line,
-                    "Zero se taqseem? Serious ho tum bhai", "/");
+            if (lt != TYPE_INT || rt != TYPE_INT) {
+                sem_error(node->line,
+                          "Arithmetic sirf int values ke liye hai", NULL);
+                return TYPE_ERROR;
             }
             return TYPE_INT;
         }
 
         default:
-            return TYPE_INT;
+            return TYPE_ERROR;
     }
 }
 
-static void check_stmt(SemanticCtx *ctx, ASTNode *node) {
+/* ─── Type-check statement ────────────────────────────────────────────────── */
+static void check_stmt(ASTNode *node, SymTable *st) {
     if (!node) return;
 
     switch (node->type) {
-        case NODE_DECL: {
-            int r = sym_declare(&ctx->table, node->name, node->dtype);
-            if (r == -1) {
-                semantic_error(node->line,
-                    "Yeh variable pehle se mojood hai", node->name);
-                ctx->error_count++;
+
+        case NODE_PROGRAM:
+        case NODE_BLOCK: {
+            ASTNode *s = node->body;
+            while (s) {
+                check_stmt(s, st);
+                s = s->next;
             }
-            if (node->left) {
-                DataType et = check_expr(ctx, node->left);
+            break;
+        }
+
+        case NODE_VAR_DECL: {
+            /* Insert into symbol table (will print error if duplicate) */
+            int ok = symtable_insert(st, node->sval, node->dtype, node->line);
+            if (ok && node->left) {
+                DataType rhs = check_expr(node->left, st);
+                SymEntry *e  = symtable_lookup(st, node->sval);
                 /* Type compatibility check */
-                if (node->dtype == TYPE_INT && et == TYPE_STRING) {
-                    semantic_error(node->line,
-                        "String ko int mein nahi dal sakte", node->name);
-                    ctx->error_count++;
-                }
-                if (node->dtype == TYPE_STRING && et == TYPE_INT) {
-                    semantic_error(node->line,
-                        "Int ko string mein nahi dal sakte", node->name);
-                    ctx->error_count++;
+                if (rhs != TYPE_ERROR && rhs != node->dtype) {
+                    char buf[200];
+                    snprintf(buf, sizeof(buf),
+                             "'%s' ko %s type dene ki koshish, lekin value %s hai",
+                             node->sval, dtype_str(node->dtype), dtype_str(rhs));
+                    sem_error(node->line, buf, NULL);
+                } else if (e) {
+                    e->initialized = 1;
+                    /* Store initial values for bool */
+                    if (node->dtype == TYPE_BOOL && node->left->type == NODE_BOOL_LIT)
+                        e->bval = node->left->bval;
                 }
             }
             break;
         }
 
         case NODE_ASSIGN: {
-            Symbol *s = sym_lookup(&ctx->table, node->name);
-            if (!s) {
-                semantic_error(node->line,
-                    "Yeh variable kabhi bataya nahi tha", node->name);
-                ctx->error_count++;
+            SymEntry *e = symtable_lookup(st, node->sval);
+            if (!e) {
+                sem_error(node->line,
+                          "Yeh variable kabhi bataya nahi", node->sval);
             } else {
-                DataType et = check_expr(ctx, node->left);
-                if (s->type == TYPE_INT && et == TYPE_STRING) {
-                    semantic_error(node->line,
-                        "String ko int variable mein nahi rakh sakte", node->name);
-                    ctx->error_count++;
+                DataType rhs = check_expr(node->left, st);
+                if (rhs != TYPE_ERROR && rhs != e->dtype) {
+                    char buf[200];
+                    snprintf(buf, sizeof(buf),
+                             "Type mismatch: '%s' %s hai, %s nahi de sakte",
+                             node->sval, dtype_str(e->dtype), dtype_str(rhs));
+                    sem_error(node->line, buf, NULL);
                 }
+                e->initialized = 1;
             }
             break;
         }
 
-        case NODE_ARZKRO:
-            check_expr(ctx, node->left);
+        case NODE_ARZKRO: {
+            check_expr(node->left, st);
             break;
+        }
 
-        case NODE_AGAR:
-            check_expr(ctx, node->cond);
-            check_stmt(ctx, node->body);
-            if (node->else_body) check_stmt(ctx, node->else_body);
+        case NODE_AGAR: {
+            DataType ct = check_expr(node->cond, st);
+            if (ct != TYPE_BOOL && ct != TYPE_ERROR) {
+                sem_warn(node->line,
+                         "agar ki condition bool honi chahiye thi");
+            }
+            check_stmt(node->body, st);
+            if (node->elseb) check_stmt(node->elseb, st);
             break;
+        }
 
-        case NODE_JABTAK:
-            check_expr(ctx, node->cond);
-            check_stmt(ctx, node->body);
+        case NODE_JABTAK: {
+            DataType ct = check_expr(node->cond, st);
+            if (ct != TYPE_BOOL && ct != TYPE_ERROR) {
+                sem_warn(node->line,
+                         "jabtak ki condition bool honi chahiye thi");
+            }
+            check_stmt(node->body, st);
             break;
+        }
 
         default:
             break;
     }
 
-    check_stmt(ctx, node->next);
+    /* Process siblings handled by parent */
 }
 
-int semantic_analyse(SemanticCtx *ctx, ASTNode *root) {
-    if (!root) return 0;
-    check_stmt(ctx, root->body);
-    return ctx->error_count;
+/* ─── Public entry ────────────────────────────────────────────────────────── */
+int semantic_check(ASTNode *root, SymTable *st) {
+    sem_errors   = 0;
+    sem_warnings = 0;
+    check_stmt(root, st);
+
+    if (sem_warnings > 0)
+        printf(YELLOW "[MadriZuban] %d khabardar(yan) mili.\n" RESET, sem_warnings);
+    if (sem_errors > 0) {
+        fprintf(stderr, RED "[MadriZuban] %d semantic ghalti(yan) — compilation rok di.\n" RESET,
+                sem_errors);
+        return 0;
+    }
+    return 1; /* clean */
 }

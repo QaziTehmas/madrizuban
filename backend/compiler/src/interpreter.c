@@ -1,144 +1,177 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include "interpreter.h"
-#include "errors.h"
+/*
+ * MadriZuban Compiler v1.0
+ * interpreter.c - Tree-Walk Interpreter
+ *
+ * Executes the AST directly, producing real program output.
+ * Handles: int/string/bool, arithmetic, comparisons,
+ *          agar/warna, jabtak, arzkro.
+ */
 
-void interp_init(Interpreter *interp) {
-    sym_init(&interp->table);
-    interp->had_runtime_error = 0;
-}
+#include "madrizuban.h"
+
+/* ─── Runtime value ───────────────────────────────────────────────────────── */
+typedef enum { RVAL_INT, RVAL_STRING, RVAL_BOOL, RVAL_ERR } RValType;
 
 typedef struct {
-    DataType type;
-    int      int_val;
-    char     str_val[256];
-    int      bool_val;
-} Val;
+    RValType type;
+    int      ival;
+    char     sval[256];
+    int      bval;
+} RVal;
 
-static Val make_int(int v)          { Val r; r.type = TYPE_INT;    r.int_val  = v; r.str_val[0]='\0'; r.bool_val=0; return r; }
-static Val make_str(const char *s)  { Val r; r.type = TYPE_STRING; r.int_val  = 0; strncpy(r.str_val,s,255); r.bool_val=0; return r; }
-static Val make_bool(int v)         { Val r; r.type = TYPE_BOOL;   r.int_val  = 0; r.str_val[0]='\0'; r.bool_val=v; return r; }
+static RVal make_int(int v)         { RVal r; r.type=RVAL_INT; r.ival=v; r.sval[0]='\0'; r.bval=0; return r; }
+static RVal make_str(const char *s) { RVal r; r.type=RVAL_STRING; r.ival=0; strncpy(r.sval,s,255); r.bval=0; return r; }
+static RVal make_bool(int v)        { RVal r; r.type=RVAL_BOOL; r.ival=0; r.sval[0]='\0'; r.bval=v; return r; }
+static RVal make_err(void)          { RVal r; r.type=RVAL_ERR; r.ival=0; r.sval[0]='\0'; r.bval=0; return r; }
 
-static Val eval_expr(Interpreter *interp, ASTNode *node);
+static int rval_truthy(RVal v) {
+    if (v.type == RVAL_INT)  return v.ival != 0;
+    if (v.type == RVAL_BOOL) return v.bval;
+    if (v.type == RVAL_STRING) return strlen(v.sval) > 0;
+    return 0;
+}
 
-static Val eval_expr(Interpreter *interp, ASTNode *node) {
-    if (!node) return make_int(0);
+/* ─── Forward ─────────────────────────────────────────────────────────────── */
+static RVal eval_expr(ASTNode *node, SymTable *st);
+static void exec_stmt(ASTNode *node, SymTable *st);
+
+/* ─── Evaluate expression ─────────────────────────────────────────────────── */
+static RVal eval_expr(ASTNode *node, SymTable *st) {
+    if (!node) return make_err();
 
     switch (node->type) {
-        case NODE_INT_LIT:  return make_int(node->int_val);
-        case NODE_STR_LIT:  return make_str(node->str_val);
-        case NODE_BOOL_LIT: return make_bool(node->bool_val);
+
+        case NODE_INT_LIT:
+            return make_int(node->ival);
+
+        case NODE_STRING_LIT:
+            return make_str(node->sval);
+
+        case NODE_BOOL_LIT:
+            return make_bool(node->bval);
 
         case NODE_IDENT: {
-            Symbol *s = sym_lookup(&interp->table, node->name);
-            if (!s) {
-                runtime_error(node->line,
-                    "Yeh variable runtime pe nahi mila", node->name);
-                interp->had_runtime_error = 1;
-                return make_int(0);
+            SymEntry *e = symtable_lookup(st, node->sval);
+            if (!e) {
+                fprintf(stderr, RED "[MadriZuban Ghalti]" RESET
+                        " bhaiyaaaa Runtime: '%s' nahi mila\n", node->sval);
+                return make_err();
             }
-            if (s->type == TYPE_STRING) return make_str(s->value.str_val);
-            if (s->type == TYPE_BOOL)   return make_bool(s->value.bool_val);
-            return make_int(s->value.int_val);
+            if (e->dtype == TYPE_INT)    return make_int(e->ival);
+            if (e->dtype == TYPE_STRING) return make_str(e->sval);
+            if (e->dtype == TYPE_BOOL)   return make_bool(e->bval);
+            return make_err();
         }
 
         case NODE_BINOP: {
-            Val l = eval_expr(interp, node->left);
-            Val r = eval_expr(interp, node->right);
+            RVal L = eval_expr(node->left,  st);
+            RVal R = eval_expr(node->right, st);
 
             /* Comparisons */
             if (strcmp(node->op, "==") == 0) {
-                if (l.type == TYPE_STRING && r.type == TYPE_STRING)
-                    return make_bool(strcmp(l.str_val, r.str_val) == 0);
-                return make_bool(l.int_val == r.int_val);
+                if (L.type == RVAL_INT)    return make_bool(L.ival  == R.ival);
+                if (L.type == RVAL_BOOL)   return make_bool(L.bval  == R.bval);
+                if (L.type == RVAL_STRING) return make_bool(strcmp(L.sval, R.sval) == 0);
             }
-            if (strcmp(node->op, "!=") == 0) return make_bool(l.int_val != r.int_val);
-            if (strcmp(node->op, "<")  == 0) return make_bool(l.int_val <  r.int_val);
-            if (strcmp(node->op, ">")  == 0) return make_bool(l.int_val >  r.int_val);
-            if (strcmp(node->op, "<=") == 0) return make_bool(l.int_val <= r.int_val);
-            if (strcmp(node->op, ">=") == 0) return make_bool(l.int_val >= r.int_val);
+            if (strcmp(node->op, "!=") == 0) {
+                if (L.type == RVAL_INT)    return make_bool(L.ival  != R.ival);
+                if (L.type == RVAL_BOOL)   return make_bool(L.bval  != R.bval);
+                if (L.type == RVAL_STRING) return make_bool(strcmp(L.sval, R.sval) != 0);
+            }
+            if (strcmp(node->op, "<")  == 0) return make_bool(L.ival <  R.ival);
+            if (strcmp(node->op, ">")  == 0) return make_bool(L.ival >  R.ival);
+            if (strcmp(node->op, "<=") == 0) return make_bool(L.ival <= R.ival);
+            if (strcmp(node->op, ">=") == 0) return make_bool(L.ival >= R.ival);
 
             /* Arithmetic */
-            if (strcmp(node->op, "+") == 0) return make_int(l.int_val + r.int_val);
-            if (strcmp(node->op, "-") == 0) return make_int(l.int_val - r.int_val);
-            if (strcmp(node->op, "*") == 0) return make_int(l.int_val * r.int_val);
+            if (strcmp(node->op, "+") == 0) return make_int(L.ival + R.ival);
+            if (strcmp(node->op, "-") == 0) return make_int(L.ival - R.ival);
+            if (strcmp(node->op, "*") == 0) return make_int(L.ival * R.ival);
             if (strcmp(node->op, "/") == 0) {
-                if (r.int_val == 0) {
-                    runtime_error(node->line,
-                        "Zero se taqseem nahi hoti bhai", "/");
-                    interp->had_runtime_error = 1;
+                if (R.ival == 0) {
+                    fprintf(stderr, YELLOW "[MadriZuban Khabardar]" RESET
+                            " bhaiyaaaa Zero se taqseem? Serious ho tum?\n");
                     return make_int(0);
                 }
-                return make_int(l.int_val / r.int_val);
+                return make_int(L.ival / R.ival);
             }
-            return make_int(0);
+
+            return make_err();
         }
 
         default:
-            return make_int(0);
+            return make_err();
     }
 }
 
-static void exec_stmt(Interpreter *interp, ASTNode *node) {
-    if (!node || interp->had_runtime_error) return;
+/* ─── Execute statement ───────────────────────────────────────────────────── */
+static void exec_stmt(ASTNode *node, SymTable *st) {
+    if (!node) return;
 
     switch (node->type) {
-        case NODE_DECL: {
-            sym_declare(&interp->table, node->name, node->dtype);
-            if (node->left) {
-                Val v = eval_expr(interp, node->left);
-                if (node->dtype == TYPE_STRING) sym_set_str(&interp->table, node->name, v.str_val);
-                else if (node->dtype == TYPE_BOOL) sym_set_bool(&interp->table, node->name, v.bool_val);
-                else sym_set_int(&interp->table, node->name, v.int_val);
+
+        case NODE_PROGRAM:
+        case NODE_BLOCK: {
+            ASTNode *s = node->body;
+            while (s) { exec_stmt(s, st); s = s->next; }
+            break;
+        }
+
+        case NODE_VAR_DECL: {
+            RVal val = eval_expr(node->left, st);
+            SymEntry *e = symtable_lookup(st, node->sval);
+            if (!e) {
+                /* Insert at runtime if not already there (second pass) */
+                symtable_insert(st, node->sval, node->dtype, node->line);
+                e = symtable_lookup(st, node->sval);
+            }
+            if (e) {
+                e->initialized = 1;
+                if (val.type == RVAL_INT)    { e->ival = val.ival; }
+                if (val.type == RVAL_STRING) { strncpy(e->sval, val.sval, 255); }
+                if (val.type == RVAL_BOOL)   { e->bval = val.bval; }
             }
             break;
         }
 
         case NODE_ASSIGN: {
-            Val v = eval_expr(interp, node->left);
-            Symbol *s = sym_lookup(&interp->table, node->name);
-            if (!s) {
-                runtime_error(node->line,
-                    "Yeh variable kabhi bataya nahi tha", node->name);
-                interp->had_runtime_error = 1;
-                break;
+            RVal val = eval_expr(node->left, st);
+            SymEntry *e = symtable_lookup(st, node->sval);
+            if (e) {
+                e->initialized = 1;
+                if (val.type == RVAL_INT)    { e->ival = val.ival; }
+                if (val.type == RVAL_STRING) { strncpy(e->sval, val.sval, 255); }
+                if (val.type == RVAL_BOOL)   { e->bval = val.bval; }
             }
-            if (s->type == TYPE_STRING) sym_set_str(&interp->table, node->name, v.str_val);
-            else if (s->type == TYPE_BOOL) sym_set_bool(&interp->table, node->name, v.bool_val);
-            else sym_set_int(&interp->table, node->name, v.int_val);
             break;
         }
 
         case NODE_ARZKRO: {
-            Val v = eval_expr(interp, node->left);
-            if (v.type == TYPE_STRING) printf("%s\n", v.str_val);
-            else if (v.type == TYPE_BOOL) printf("%s\n", v.bool_val ? "sach" : "jhoot");
-            else printf("%d\n", v.int_val);
+            RVal val = eval_expr(node->left, st);
+            if (val.type == RVAL_INT)    printf("%d\n", val.ival);
+            if (val.type == RVAL_STRING) printf("%s\n", val.sval);
+            if (val.type == RVAL_BOOL)   printf("%s\n", val.bval ? "sach" : "jhoot");
             break;
         }
 
         case NODE_AGAR: {
-            Val cond = eval_expr(interp, node->cond);
-            int truth = (cond.type == TYPE_BOOL) ? cond.bool_val : cond.int_val;
-            if (truth) exec_stmt(interp, node->body);
-            else if (node->else_body) exec_stmt(interp, node->else_body);
+            RVal cond = eval_expr(node->cond, st);
+            if (rval_truthy(cond))
+                exec_stmt(node->body, st);
+            else if (node->elseb)
+                exec_stmt(node->elseb, st);
             break;
         }
 
         case NODE_JABTAK: {
-            int max_iter = 100000;
-            while (max_iter-- > 0) {
-                Val cond = eval_expr(interp, node->cond);
-                int truth = (cond.type == TYPE_BOOL) ? cond.bool_val : cond.int_val;
-                if (!truth) break;
-                exec_stmt(interp, node->body);
-                if (interp->had_runtime_error) break;
-            }
-            if (max_iter <= 0) {
-                runtime_error(node->line,
-                    "Yeh loop khatam nahi ho raha tha bhai — roka", "jabtak");
-                interp->had_runtime_error = 1;
+            int iter = 0;
+            while (rval_truthy(eval_expr(node->cond, st))) {
+                exec_stmt(node->body, st);
+                if (++iter > 100000) {
+                    fprintf(stderr, YELLOW "[MadriZuban Khabardar]" RESET
+                            " bhaiyaaaa Infinite loop lag raha hai — rok diya\n");
+                    break;
+                }
             }
             break;
         }
@@ -146,11 +179,9 @@ static void exec_stmt(Interpreter *interp, ASTNode *node) {
         default:
             break;
     }
-
-    exec_stmt(interp, node->next);
 }
 
-void interp_run(Interpreter *interp, ASTNode *root) {
-    if (!root) return;
-    exec_stmt(interp, root->body);
+/* ─── Public entry ────────────────────────────────────────────────────────── */
+void interpreter_run(ASTNode *root, SymTable *st) {
+    exec_stmt(root, st);
 }

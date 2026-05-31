@@ -1,0 +1,21 @@
+// MadriZuban Test 5: string type
+// Tests: string variables, arzkro with strings
+
+string greeting = "Salam Duniya";
+string language = "MadriZuban";
+string university = "Air University";
+
+arzkro greeting;
+arzkro language;
+arzkro university;
+
+// String in condition
+bool isUrdu = sach;
+string msg = "Default";
+
+agar (isUrdu == sach) {
+    msg = "Ye compiler Roman Urdu mein baat karta hai!";
+} warna {
+    msg = "Normal language";
+}
+arzkro msg;

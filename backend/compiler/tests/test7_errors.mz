@@ -1,0 +1,13 @@
+// MadriZuban Test 7: Error Handling Demonstration
+// This program INTENTIONALLY has errors to show compiler error detection
+
+// ERROR 1: Using undeclared variable
+arzkro z;
+
+// ERROR 2: Re-declaring same variable
+int x = 5;
+int x = 10;
+
+// WARNING: Division by zero
+int result = x / 0;
+arzkro result;

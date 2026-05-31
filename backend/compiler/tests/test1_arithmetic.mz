@@ -1,14 +1,19 @@
-// Test 1: Arithmetic Operations
-// MadriZuban - Basic math
+// MadriZuban Test 1: Arithmetic Operations
+// Tests: int variables, +, -, *, /, arzkro
 
 int a = 10;
 int b = 5;
-int c = a + b;
-int d = a * b;
-int e = a - b;
-int f = a / b;
 
-arzkro c;
-arzkro d;
-arzkro e;
-arzkro f;
+int sum = a + b;
+int diff = a - b;
+int product = a * b;
+int quotient = a / b;
+
+arzkro sum;
+arzkro diff;
+arzkro product;
+arzkro quotient;
+
+// Complex expression
+int result = (a + b) * 2 - 3;
+arzkro result;

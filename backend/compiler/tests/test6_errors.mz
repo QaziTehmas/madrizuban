@@ -1,5 +1,0 @@
-// Test 6: Error Demonstration
-// This file contains intentional errors to show error handling
-
-int x = 10;
-arzkro y;

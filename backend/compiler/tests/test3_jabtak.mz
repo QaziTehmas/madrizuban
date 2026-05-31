@@ -1,8 +1,27 @@
-// Test 3: jabtak loop (while loop)
-// Counting 1 to 5
+// MadriZuban Test 3: jabtak (while loop)
+// Tests: looping, counter, accumulator
 
+// Count 1 to 5
 int i = 1;
 jabtak (i <= 5) {
     arzkro i;
     i = i + 1;
 }
+
+// Factorial of 5
+int n = 5;
+int fact = 1;
+jabtak (n > 0) {
+    fact = fact * n;
+    n = n - 1;
+}
+arzkro fact;
+
+// Sum of 1 to 10
+int sum = 0;
+int counter = 1;
+jabtak (counter <= 10) {
+    sum = sum + counter;
+    counter = counter + 1;
+}
+arzkro sum;
