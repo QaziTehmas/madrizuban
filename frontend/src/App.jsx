@@ -91,7 +91,7 @@ function extractTokens(text) {
   const lines = afterStart.split(/\r?\n/);
 
   let dataStartIdx = 2;
-  if (lines[1] && (lines[1].trim().startsWith('-') || lines[1].trim().startsWith(''))) {
+  if (lines[1] && lines[1].trim().startsWith('-')) {
     dataStartIdx = 2;
   } else {
     dataStartIdx = 1;
@@ -100,7 +100,7 @@ function extractTokens(text) {
   const resultLines = [];
   for (let i = dataStartIdx; i < lines.length; i++) {
     const line = lines[i];
-    if (line.includes('tokens erkened') || line.includes('Phase 2') || line.trim().startsWith('──') || line.trim().startsWith('==') || line.trim().startsWith('')) {
+    if (line.includes('tokens erkened') || line.includes('Phase 2') || line.trim().startsWith('──') || line.trim().startsWith('==')) {
       break;
     }
     resultLines.push(line);
@@ -118,7 +118,7 @@ function extractAST(text) {
   const resultLines = [];
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    if (line.includes('Phase 3') || line.includes('Semantic Analysis') || line.trim().startsWith('──') || line.trim().startsWith('==') || line.trim().startsWith('')) {
+    if (line.includes('Phase 3') || line.includes('Semantic Analysis') || line.trim().startsWith('──') || line.trim().startsWith('==')) {
       break;
     }
     resultLines.push(line);
@@ -136,7 +136,7 @@ function extractTAC(text) {
   const resultLines = [];
   for (let i = 1; i < lines.length; i++) {
     const line = lines[i];
-    if (line.includes('TAC generation complete') || line.includes('Phase 5') || line.includes('Execution') || line.trim().startsWith('──') || line.trim().startsWith('==') || line.trim().startsWith('')) {
+    if (line.includes('TAC generation complete') || line.includes('Phase 5') || line.includes('Execution') || line.trim().startsWith('──') || line.trim().startsWith('==')) {
       break;
     }
     resultLines.push(line);
