@@ -1,0 +1,17 @@
+// Test 2: agar / warna (if / else)
+// MadriZuban - Conditional logic
+
+int x = 20;
+int y = 30;
+
+agar (x > y) {
+    arzkro x;
+} warna {
+    arzkro y;
+}
+
+// Nested agar
+int score = 85;
+agar (score >= 80) {
+    arzkro score;
+}

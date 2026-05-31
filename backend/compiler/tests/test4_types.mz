@@ -1,0 +1,21 @@
+// Test 4: String and Bool data types
+// MadriZuban - Multiple types
+
+string greeting = "Salam Duniya";
+string lang = "MadriZuban";
+bool flag = sach;
+
+arzkro greeting;
+arzkro lang;
+arzkro flag;
+
+// Bool in condition
+agar (flag == sach) {
+    arzkro greeting;
+} warna {
+    arzkro lang;
+}
+
+// Reassign bool
+flag = jhoot;
+arzkro flag;

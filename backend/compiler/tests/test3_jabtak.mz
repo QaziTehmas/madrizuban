@@ -1,0 +1,8 @@
+// Test 3: jabtak loop (while loop)
+// Counting 1 to 5
+
+int i = 1;
+jabtak (i <= 5) {
+    arzkro i;
+    i = i + 1;
+}

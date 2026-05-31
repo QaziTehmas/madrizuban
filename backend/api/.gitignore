@@ -1,0 +1,4 @@
+# Backend API ignores
+node_modules/
+.env
+.env.*
