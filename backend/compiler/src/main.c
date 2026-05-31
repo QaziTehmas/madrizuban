@@ -61,8 +61,8 @@ static char *read_file(const char *path) {
     rewind(f);
     char *buf = (char *)malloc(sz + 1);
     if (!buf) { fclose(f); exit(1); }
-    fread(buf, 1, sz, f);
-    buf[sz] = '\0';
+    size_t actual = fread(buf, 1, sz, f);
+    buf[actual] = '\0';
     fclose(f);
     return buf;
 }

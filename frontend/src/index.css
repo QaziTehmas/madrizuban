@@ -1,0 +1,66 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+:root {
+  --page-bg: #f5f5f5;
+  --surface: #ffffff;
+  --surface-strong: #fafafa;
+  --surface-muted: #ededed;
+  --border: #e0e0e0;
+  --text: #1a1a1a;
+  --text-muted: #666666;
+  --accent: #2563eb;
+  --accent-strong: #1d4ed8;
+  --accent-soft: rgba(37, 99, 235, 0.08);
+  --focus: rgba(37, 99, 235, 0.24);
+  --editor-bg: #1e1e1e;
+  --tab-bg: #fafafa;
+  --shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
+
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  color: var(--text);
+  background: var(--page-bg);
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-height: 100%;
+  background: var(--page-bg);
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    linear-gradient(transparent 0, transparent 24px, rgba(0, 0, 0, 0.015) 25px),
+    linear-gradient(90deg, transparent 0, transparent 24px, rgba(0, 0, 0, 0.015) 25px);
+  background-size: 25px 25px;
+  background-color: var(--page-bg);
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+::selection {
+  background: var(--accent-soft);
+}
+
+#root {
+  min-height: 100vh;
+}
